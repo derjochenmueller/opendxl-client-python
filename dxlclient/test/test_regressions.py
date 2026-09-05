@@ -22,9 +22,9 @@ import unittest
 from nose.plugins.attrib import attr
 from mock import MagicMock
 
-from dxlclient import Broker, DxlClientConfig, DxlException, DxlUtils, \
-    ErrorResponse, Event, Message, Request, RequestManager, Response, \
-    UuidGenerator, WaitTimeoutException
+from dxlclient import Broker, DxlClient, DxlClientConfig, DxlException, \
+    DxlUtils, ErrorResponse, Event, Message, Request, RequestManager, \
+    Response, UuidGenerator, WaitTimeoutException
 from dxlclient.callbacks import RequestCallback, ResponseCallback
 from dxlclient.service import _ServiceRegistrationHandler, \
     ServiceRegistrationInfo
@@ -251,6 +251,38 @@ class ClientConfigRegressionTest(unittest.TestCase):
                          config.tls_ciphers)
         config.tls_ciphers = None
         self.assertIsNone(config.tls_ciphers)
+
+    def test_default_cipher_list_contains_strong_and_legacy_suites(self):
+        import ssl
+        context = ssl.SSLContext(DxlClient._get_tls_protocol())
+        context.set_ciphers(DxlClientConfig._DEFAULT_TLS_CIPHERS)
+        names = [cipher["name"] for cipher in context.get_ciphers()]
+
+        # Legacy suite required by Trellix DXL brokers < 6.1.1 and the open
+        # source broker ...
+        self.assertIn("AES128-SHA256", names)
+        # ... but only as a fallback after forward-secrecy suites
+        self.assertEqual("AES128-SHA256", names[-1])
+        self.assertTrue(any(name.startswith("ECDHE-") for name in names))
+        self.assertFalse(any("NULL" in name for name in names))
+
+    def test_ipv6_broker_parsing(self):
+        broker = Broker.parse("ssl://[::1]:8883")
+        self.assertEqual("::1", broker.host_name)
+        self.assertEqual(8883, broker.port)
+
+        broker = Broker.parse("ssl://[fe80::1]")
+        self.assertEqual("fe80::1", broker.host_name)
+        self.assertEqual(8883, broker.port)
+
+        # Config file broker line with an IPv6 address
+        broker = Broker(host_name="none")
+        broker._parse("{guid};8883;broker.example;2001:db8::10")
+        self.assertEqual("{guid}", broker.unique_id)
+        self.assertEqual("broker.example", broker.host_name)
+        self.assertEqual("2001:db8::10", broker.ip_address)
+        self.assertEqual("{guid};8883;broker.example;2001:db8::10",
+                         broker._to_broker_string())
 
 
 class ServiceRegistrationRetryTest(unittest.TestCase):
