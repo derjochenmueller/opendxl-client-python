@@ -141,6 +141,7 @@ class DxlClientConfig(_BaseObject):
     _USE_WEBSOCKETS_SETTING = u"UseWebSockets"
     _TLS_CIPHERS_SETTING = u"TlsCiphers"
     _TLS_MIN_VERSION_SETTING = u"TlsMinVersion"
+    _VERIFY_HOSTNAME_SETTING = u"VerifyHostname"
 
     # HTTP Proxy Section
     _PROXY_SECTION = u"Proxy"
@@ -158,7 +159,8 @@ class DxlClientConfig(_BaseObject):
          ((_CLIENT_ID_SETTING, "Client Id", _NOT_REQUIRED),
           (_USE_WEBSOCKETS_SETTING, "Use WebSockets", _NOT_REQUIRED),
           (_TLS_CIPHERS_SETTING, "TLS ciphers", _NOT_REQUIRED),
-          (_TLS_MIN_VERSION_SETTING, "TLS minimum version", _NOT_REQUIRED)),
+          (_TLS_MIN_VERSION_SETTING, "TLS minimum version", _NOT_REQUIRED),
+          (_VERIFY_HOSTNAME_SETTING, "Verify broker hostname", _NOT_REQUIRED)),
          _NOT_REQUIRED),
         (_CERTS_SECTION,
          ((_BROKER_CERT_CHAIN_SETTING, "Broker CA bundle", _REQUIRED),
@@ -197,6 +199,11 @@ class DxlClientConfig(_BaseObject):
     # TLS 1.0/1.1 are deprecated (RFC 8996) and not offered by DXL brokers.
     _DEFAULT_TLS_MIN_VERSION = "1.2"
     _TLS_VERSIONS = ("1.2", "1.3")
+    # Whether the broker certificate's subject/SAN must match the host name
+    # the client connects to. Off by default: DXL brokers are identified by
+    # their certificate chain (issued by the ePO/DXL CA), the broker list
+    # often carries IP addresses, and the upstream client never verified it.
+    _DEFAULT_VERIFY_HOSTNAME = False
     # The default OpenSSL cipher list used for the TLS connection to the
     # broker (``None`` uses the defaults of the Python ``ssl`` module).
     # This branch targets Trellix ePO 5.10 SP1 Update 7+ with DXL Broker
@@ -268,6 +275,7 @@ class DxlClientConfig(_BaseObject):
         self._incoming_message_thread_pool_size = None
         self._tls_ciphers = None
         self._tls_min_version = None
+        self._verify_hostname = None
         self._init_common()
 
     def _create_required_sections(self):
@@ -348,6 +356,8 @@ class DxlClientConfig(_BaseObject):
         self._tls_ciphers = self._DEFAULT_TLS_CIPHERS
         # The minimum TLS protocol version
         self._tls_min_version = self._DEFAULT_TLS_MIN_VERSION
+        # Whether to verify the broker host name against its certificate
+        self._verify_hostname = self._DEFAULT_VERIFY_HOSTNAME
 
     def _get_value_from_config(self, section_or_setting_name):
         """
@@ -629,6 +639,38 @@ class DxlClientConfig(_BaseObject):
                 tls_min_version, ", ".join(self._TLS_VERSIONS)))
         self._tls_min_version = tls_min_version
         self._set_value_to_config(self._TLS_MIN_VERSION_SETTING, tls_min_version)
+
+    @property
+    def verify_hostname(self):
+        """
+        Whether the host name (or IP address) used to connect to the broker
+        must match the broker certificate (``check_hostname`` of the SSL
+        context). Defaults to ``False`` for compatibility with existing DXL
+        deployments; can be set in the configuration file via the
+        ``VerifyHostname`` setting of the ``General`` section.
+        """
+        return self._verify_hostname
+
+    @verify_hostname.setter
+    def verify_hostname(self, verify_hostname):
+        self._verify_hostname = self._to_bool(verify_hostname)
+        self._set_value_to_config(self._VERIFY_HOSTNAME_SETTING,
+                                  "yes" if self._verify_hostname else "no")
+
+    @staticmethod
+    def _to_bool(value):
+        """
+        Converts a configuration value to ``bool`` (``configobj`` semantics:
+        true/yes/on/1 and false/no/off/0, case-insensitive).
+        """
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ("true", "yes", "on", "1"):
+            return True
+        if text in ("false", "no", "off", "0", ""):
+            return False
+        raise ValueError("Invalid boolean value: {}".format(value))
 
     @staticmethod
     def _tls_ciphers_from_setting(value):
@@ -932,6 +974,9 @@ class DxlClientConfig(_BaseObject):
         tls_min_version = self._get_value_from_config(self._TLS_MIN_VERSION_SETTING)
         if tls_min_version:
             self.tls_min_version = tls_min_version
+        verify_hostname = self._get_value_from_config(self._VERIFY_HOSTNAME_SETTING)
+        if verify_hostname is not None:
+            self._verify_hostname = self._to_bool(verify_hostname)
 
         # Get Proxy Settings from Config file
         self._proxy_addr = self._get_value_from_config(self._PROXY_ADDRESS_SETTING)

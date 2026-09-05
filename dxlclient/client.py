@@ -399,8 +399,10 @@ class DxlClient(_BaseObject):
                              cert_reqs=ssl.CERT_REQUIRED,
                              tls_version=self._get_tls_protocol(),
                              ciphers=config.tls_ciphers)
-        # The MQTT client TLS configuration to bypass hostname validation
-        self._client.tls_insecure_set(True)
+        # Host name verification is off by default (see
+        # DxlClientConfig.verify_hostname); tls_insecure_set(False) enables
+        # the SSL context's check_hostname.
+        self._client.tls_insecure_set(not config.verify_hostname)
         # Enforce the configured minimum TLS protocol version
         self._apply_tls_min_version(config.tls_min_version)
 
