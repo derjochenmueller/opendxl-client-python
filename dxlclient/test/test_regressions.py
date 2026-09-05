@@ -397,6 +397,37 @@ class ConnectFailureTest(BaseClientTest):
             client.disconnect()
             self.assertFalse(client.connected)
 
+    def test_failed_connect_does_not_wait_for_connect_callback(self):
+        """
+        When the connect thread gives up without starting the MQTT loop
+        there is no connect callback pending; ``connect()`` used to wait
+        ``_DEFAULT_CONNECT_WAIT`` (10 s) for it anyway before raising.
+        """
+        config = DxlClientConfig.create_dxl_config_from_file(
+            os.path.dirname(os.path.abspath(__file__)) + "/client_config.cfg")
+        bad_brokers = [Broker(host_name="127.0.0.1", unique_id="bad",
+                              ip_address="127.0.0.1", port=1)]
+        config.brokers = bad_brokers
+        config.websocket_brokers = bad_brokers
+        config.connect_retries = 0
+        config.reconnect_delay = 0.1
+
+        with self.create_client_from_config(config) as client:
+            waits = []
+            original_wait = client._connected_wait_condition.wait
+
+            def recording_wait(timeout=None):
+                waits.append(timeout)
+                return original_wait(timeout)
+
+            client._connected_wait_condition.wait = recording_wait
+            with self.assertRaises(DxlException):
+                client.connect()
+
+            self.assertFalse(client.connected)
+            self.assertIsNone(client._client._thread)
+            self.assertEqual([], waits)
+
     def create_client_from_config(self, config):
         from dxlclient.test.base_test import TestDxlClient
         return TestDxlClient(config)

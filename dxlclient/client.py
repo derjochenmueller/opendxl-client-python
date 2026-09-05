@@ -425,6 +425,8 @@ class DxlClient(_BaseObject):
         self._thread = None
         # The loop thread terminate flag
         self._thread_terminate = False
+        # Result of the last run of the connect thread (``DXL_ERR_*``)
+        self._connect_result = None
 
         # The lock for the connect thread
         self._connect_wait_lock = threading.RLock()
@@ -509,10 +511,14 @@ class DxlClient(_BaseObject):
                 self._thread.join(1)
             self._thread = None
 
-        # Wait for the callback to be invoked
-        with self._connected_lock:
-            if not self.connected:
-                self._connected_wait_condition.wait(self._DEFAULT_CONNECT_WAIT)
+        # Wait for the callback to be invoked. Only do so when the connect
+        # thread actually started the MQTT network loop; otherwise no
+        # callback is pending and the wait would merely delay the exception
+        # by ``_DEFAULT_CONNECT_WAIT`` seconds.
+        if self._connect_result == DXL_ERR_SUCCESS:
+            with self._connected_lock:
+                if not self.connected:
+                    self._connected_wait_condition.wait(self._DEFAULT_CONNECT_WAIT)
 
         # Check if we were connected
         if not self.connected:
@@ -529,6 +535,7 @@ class DxlClient(_BaseObject):
         return getattr(ssl, "PROTOCOL_TLS_CLIENT", ssl.PROTOCOL_SSLv23)
 
     def _start_connect_thread(self, connect_retries=-1):
+        self._connect_result = None
         self._thread = threading.Thread(target=self._connect_thread_main, args=[connect_retries])
         self._thread.daemon = True
         self._thread.start()
@@ -657,7 +664,7 @@ class DxlClient(_BaseObject):
         The connection thread main function
         """
         self._thread_terminate = False
-        self._loop_until_connected(connect_retries)
+        self._connect_result = self._loop_until_connected(connect_retries)
 
     def _connect(self, brokers): # pylint: disable=too-many-branches
         """
