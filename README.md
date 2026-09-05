@@ -24,6 +24,20 @@ To start using the OpenDXL Python client:
   * The `README` links to the SDK documentation which includes installation instructions, API details, and samples.
   * The SDK documentation is also available on-line [here](https://opendxl.github.io/opendxl-client-python/pydoc).
 
+## Branches (this fork)
+
+| Branch | Target environment | TLS cipher default |
+|---|---|---|
+| `master` | Trellix ePO On-prem 5.10.0 SP1 Update 7 or later with DXL Broker 6.1.1 or later (FIPS 140-3, OpenSSL 3.x, TLS 1.3 on the ePO side) | forward-secrecy suites only (`ECDHE+AESGCM:ECDHE+AES:DHE+AES:!aNULL:!eNULL`) |
+| `epo-legacy` | Older ePO 5.10 updates and DXL Brokers up to 6.1.0 (MQTT listener offers only `AES128-SHA256`), also the open source `opendxl-broker` | forward-secrecy suites first, `AES128-SHA256` as fallback |
+
+Both branches share all bug fixes; they differ only in the default of
+`DxlClientConfig.tls_ciphers`. The default can be overridden on either branch
+through the `TlsCiphers` setting in the `[General]` section of
+`dxlclient.config` (see `dxlclient.client_config`). Trellix DXL 6.1.1 added
+"strong ciphers along with weak ciphers" for MQTT (KB14602); brokers before that
+release require the `epo-legacy` default or an explicit `TlsCiphers` value.
+
 ## Bugs and Feedback
 
 For bugs, questions and discussions please use the [Github Issues](https://github.com/opendxl/opendxl-client-python/issues).
