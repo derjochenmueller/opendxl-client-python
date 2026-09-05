@@ -1,11 +1,13 @@
 
 name: Build
 
-on: 
+on:
   push:
     branches:
       - master
+      - epo-legacy
   pull_request:
+  workflow_dispatch:
   schedule:
     - cron:  '0 0 * * *'
 
