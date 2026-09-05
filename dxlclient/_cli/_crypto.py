@@ -171,16 +171,51 @@ class X509Name(object):
 _CRYPTO_SIGN_DIGEST = "sha256"
 _CRYPTO_KEY_TYPE = "rsa"
 _CRYPTO_KEY_BITS = 2048
+_CRYPTO_EC_CURVE = "secp256r1"
+
+KEY_TYPES = ("rsa", "ec")
+"""Supported private key types for certificate requests"""
+RSA_KEY_SIZES = (2048, 3072, 4096)
+"""Supported RSA key sizes in bits"""
+EC_CURVES = ("secp256r1", "secp384r1", "secp521r1")
+"""Supported named curves for EC keys"""
 
 
 class _KeyPair(object):
     """
     RSA public / private key pair generator
     """
-    def __init__(self):
-        self._key_pair = asymmetric.generate_pair(_CRYPTO_KEY_TYPE,
-                                                  _CRYPTO_KEY_BITS)
+    def __init__(self, key_type=_CRYPTO_KEY_TYPE, key_bits=_CRYPTO_KEY_BITS,
+                 curve=_CRYPTO_EC_CURVE):
+        """
+        Constructor parameters:
+
+        :param str key_type: ``"rsa"`` (default) or ``"ec"``
+        :param int key_bits: RSA key size in bits (2048, 3072 or 4096)
+        :param str curve: named curve for EC keys (secp256r1, secp384r1,
+            secp521r1)
+        """
+        if key_type not in KEY_TYPES:
+            raise ValueError("Unsupported key type: {}".format(key_type))
+        if key_type == "ec":
+            if curve not in EC_CURVES:
+                raise ValueError("Unsupported EC curve: {}".format(curve))
+            self._key_pair = asymmetric.generate_pair("ec", curve=curve)
+        else:
+            if int(key_bits) not in RSA_KEY_SIZES:
+                raise ValueError("Unsupported RSA key size: {}".format(key_bits))
+            self._key_pair = asymmetric.generate_pair("rsa", int(key_bits))
+        self._key_type = key_type
         self._public_key, self._private_key = self._key_pair
+
+    @property
+    def key_type(self):
+        """
+        The key type (``"rsa"`` or ``"ec"``)
+
+        :rtype: str
+        """
+        return self._key_type
 
     @property
     def private_key(self):
@@ -231,15 +266,24 @@ class _CertificateRequest(object):
         :type sans: list(str) or tuple(str) or set(str)
         """
         csr_info = self._csr_info(subject, key_pair.public_key, sans)
-        csr_signature = asymmetric.rsa_pkcs1v15_sign(
-            key_pair.private_key,
-            csr_info.dump(),
-            _CRYPTO_SIGN_DIGEST
-        )
+        if getattr(key_pair, "key_type", "rsa") == "ec":
+            csr_signature = asymmetric.ecdsa_sign(
+                key_pair.private_key,
+                csr_info.dump(),
+                _CRYPTO_SIGN_DIGEST
+            )
+            algorithm = u"{}_ecdsa".format(_CRYPTO_SIGN_DIGEST)
+        else:
+            csr_signature = asymmetric.rsa_pkcs1v15_sign(
+                key_pair.private_key,
+                csr_info.dump(),
+                _CRYPTO_SIGN_DIGEST
+            )
+            algorithm = u"{}_rsa".format(_CRYPTO_SIGN_DIGEST)
         self._req = csr.CertificationRequest({
             "certification_request_info": csr_info,
             "signature_algorithm": {
-                "algorithm": u"{}_rsa".format(_CRYPTO_SIGN_DIGEST)
+                "algorithm": algorithm
             },
             "signature": csr_signature})
 
@@ -348,7 +392,8 @@ class CsrAndPrivateKeyGenerator(object):
     """
     Certificate request and private key generator
     """
-    def __init__(self, subject, sans=None):
+    def __init__(self, subject, sans=None, key_type=_CRYPTO_KEY_TYPE,
+                 key_bits=_CRYPTO_KEY_BITS, curve=_CRYPTO_EC_CURVE):
         """
         Constructor parameters:
 
@@ -356,8 +401,11 @@ class CsrAndPrivateKeyGenerator(object):
         :param sans: collection of dns names to insert into a subjAltName
             extension for the certificate request
         :type sans: list(str) or tuple(str) or set(str)
+        :param str key_type: ``"rsa"`` (default) or ``"ec"``
+        :param int key_bits: RSA key size in bits (default 2048)
+        :param str curve: named curve for EC keys (default secp256r1)
         """
-        self._key_pair = _KeyPair()
+        self._key_pair = _KeyPair(key_type, key_bits, curve)
         self._csr = _CertificateRequest(subject, self._key_pair, sans)
 
     def save_csr_and_private_key(self, csr_filename, private_key_filename,

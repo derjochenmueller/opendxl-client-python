@@ -16,7 +16,7 @@ import os
 
 from dxlclient import Broker, DxlClientConfig
 from dxlclient._cli._crypto import X509Name, validate_cert_pem, \
-    CsrAndPrivateKeyGenerator
+    CsrAndPrivateKeyGenerator, KEY_TYPES, RSA_KEY_SIZES, EC_CURVES
 from dxlclient._cli._management_service import ManagementService
 from dxlclient import DxlUtils
 
@@ -207,6 +207,15 @@ def _get_crypto_argparser():
                             confirm=True),
                         default=None, required=False, nargs="?",
                         help="password for the private key")
+    parser.add_argument("--key-type", metavar="TYPE", choices=KEY_TYPES,
+                        default="rsa",
+                        help="private key type: rsa (default) or ec")
+    parser.add_argument("--key-bits", metavar="BITS", type=int,
+                        choices=RSA_KEY_SIZES, default=2048,
+                        help="RSA key size in bits (default: 2048)")
+    parser.add_argument("--key-curve", metavar="CURVE", choices=EC_CURVES,
+                        default="secp256r1",
+                        help="named curve for EC keys (default: secp256r1)")
 
     rdn_group = parser.add_argument_group(
         "optional csr subject arguments",
@@ -344,8 +353,11 @@ def generate_csr_and_private_key(common_name, private_key_filename, args):
     :rtype: str
     """
     x509_name = get_x509_name_from_cli_args(common_name, args)
-    generator = CsrAndPrivateKeyGenerator(x509_name,
-                                          args.san)
+    generator = CsrAndPrivateKeyGenerator(
+        x509_name, args.san,
+        key_type=getattr(args, "key_type", "rsa"),
+        key_bits=getattr(args, "key_bits", 2048),
+        curve=getattr(args, "key_curve", "secp256r1"))
     generator.save_csr_and_private_key(os.path.join(args.config_dir,
                                                     _csr_filename(
                                                         args.file_prefix)),
