@@ -266,6 +266,36 @@ class ClientConfigRegressionTest(unittest.TestCase):
         self.assertTrue(any(name.startswith("ECDHE-") for name in names))
         self.assertFalse(any("NULL" in name for name in names))
 
+    def test_tls_ciphers_from_config_file(self):
+        temp_dir = tempfile.mkdtemp()
+        try:
+            config_file = os.path.join(temp_dir, "dxlclient.config")
+            for value, expected in (
+                    (None, DxlClientConfig._DEFAULT_TLS_CIPHERS),
+                    ("default", None),
+                    ("", None),
+                    ("ECDHE+AESGCM:!aNULL", "ECDHE+AESGCM:!aNULL")):
+                general = "" if value is None else \
+                    "TlsCiphers = {}\n".format(value)
+                with open(config_file, "w") as handle:
+                    handle.write(
+                        "[General]\n" + general +
+                        "[Certs]\nBrokerCertChain = ca.crt\n"
+                        "CertFile = client.crt\nPrivateKey = client.key\n"
+                        "[Brokers]\nb1 = b1;8883;broker1\n")
+                config = DxlClientConfig.create_dxl_config_from_file(
+                    config_file)
+                self.assertEqual(expected, config.tls_ciphers,
+                                 "TlsCiphers={!r}".format(value))
+
+            # Round trip through write(): the value is persisted
+            config.tls_ciphers = "AES128-SHA256"
+            config.write(config_file)
+            config = DxlClientConfig.create_dxl_config_from_file(config_file)
+            self.assertEqual("AES128-SHA256", config.tls_ciphers)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_ipv6_broker_parsing(self):
         broker = Broker.parse("ssl://[::1]:8883")
         self.assertEqual("::1", broker.host_name)

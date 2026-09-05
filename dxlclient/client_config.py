@@ -139,6 +139,7 @@ class DxlClientConfig(_BaseObject):
     _GENERAL_SECTION = u"General"
     _CLIENT_ID_SETTING = u"ClientId"
     _USE_WEBSOCKETS_SETTING = u"UseWebSockets"
+    _TLS_CIPHERS_SETTING = u"TlsCiphers"
 
     # HTTP Proxy Section
     _PROXY_SECTION = u"Proxy"
@@ -154,7 +155,8 @@ class DxlClientConfig(_BaseObject):
     _SETTINGS = (
         (_GENERAL_SECTION,
          ((_CLIENT_ID_SETTING, "Client Id", _NOT_REQUIRED),
-          (_USE_WEBSOCKETS_SETTING, "Use WebSockets", _NOT_REQUIRED)),
+          (_USE_WEBSOCKETS_SETTING, "Use WebSockets", _NOT_REQUIRED),
+          (_TLS_CIPHERS_SETTING, "TLS ciphers", _NOT_REQUIRED)),
          _NOT_REQUIRED),
         (_CERTS_SECTION,
          ((_BROKER_CERT_CHAIN_SETTING, "Broker CA bundle", _REQUIRED),
@@ -581,12 +583,44 @@ class DxlClientConfig(_BaseObject):
         ``"ECDHE+AESGCM:ECDHE+AES:DHE+AES:AES128-SHA256:!aNULL:!eNULL"``:
         forward-secrecy suites first, ``AES128-SHA256`` as fallback for
         older brokers.
+
+        The value can also be set in the configuration file via the
+        ``TlsCiphers`` setting of the ``General`` section (``default`` or an
+        empty value selects the Python ``ssl`` defaults):
+
+        .. code-block:: ini
+
+            [General]
+            TlsCiphers=ECDHE+AESGCM:ECDHE+AES:!aNULL:!eNULL
         """
         return self._tls_ciphers
 
     @tls_ciphers.setter
     def tls_ciphers(self, tls_ciphers):
         self._tls_ciphers = tls_ciphers
+        self._set_value_to_config(self._TLS_CIPHERS_SETTING,
+                                  "default" if tls_ciphers is None
+                                  else tls_ciphers)
+
+    @staticmethod
+    def _tls_ciphers_from_setting(value):
+        """
+        Translate the ``TlsCiphers`` configuration file value into the value
+        used for :attr:`tls_ciphers`.
+
+        :param value: the raw setting value (``None`` if not present)
+        :return: ``None`` for the ``ssl`` module defaults, otherwise the
+            cipher list string
+        """
+        if value is None:
+            return DxlClientConfig._DEFAULT_TLS_CIPHERS
+        if isinstance(value, (list, tuple)):
+            # configobj splits unquoted values on commas
+            value = ",".join(value)
+        value = value.strip()
+        if not value or value.lower() == "default":
+            return None
+        return value
 
     @property
     def incoming_message_queue_size(self):
@@ -864,6 +898,9 @@ class DxlClientConfig(_BaseObject):
             self._use_websockets = self._config.get(self._GENERAL_SECTION).as_bool(self._USE_WEBSOCKETS_SETTING)
         else:
             self._use_websockets = bool(self._websocket_brokers and not self._brokers)
+
+        self._tls_ciphers = self._tls_ciphers_from_setting(
+            self._get_value_from_config(self._TLS_CIPHERS_SETTING))
 
         # Get Proxy Settings from Config file
         self._proxy_addr = self._get_value_from_config(self._PROXY_ADDRESS_SETTING)
