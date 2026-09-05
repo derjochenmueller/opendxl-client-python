@@ -401,6 +401,8 @@ class DxlClient(_BaseObject):
                              ciphers=config.tls_ciphers)
         # The MQTT client TLS configuration to bypass hostname validation
         self._client.tls_insecure_set(True)
+        # Enforce the configured minimum TLS protocol version
+        self._apply_tls_min_version(config.tls_min_version)
 
         # Generate a message pool prefix
         self._message_pool_prefix = "DxlMessagePool-" + UuidGenerator.generate_id_as_string()
@@ -523,6 +525,24 @@ class DxlClient(_BaseObject):
         # Check if we were connected
         if not self.connected:
             raise DxlException("Failed to establish connection")
+
+    def _apply_tls_min_version(self, tls_min_version):
+        """
+        Sets the minimum TLS protocol version on the SSL context created by
+        the MQTT client (``tls_set``). Requires Python 3.7+ (``ssl.TLSVersion``);
+        older interpreters keep the OpenSSL defaults.
+
+        :param tls_min_version: ``"1.2"`` or ``"1.3"``
+        """
+        context = getattr(self._client, "_ssl_context", None)
+        versions = getattr(ssl, "TLSVersion", None)
+        if context is None or versions is None:
+            return
+        minimum = {"1.2": versions.TLSv1_2, "1.3": versions.TLSv1_3}[str(tls_min_version)]
+        try:
+            context.minimum_version = minimum
+        except (ValueError, AttributeError) as ex:  # pragma: no cover
+            logger.warning("Unable to set minimum TLS version %s: %s", tls_min_version, ex)
 
     @staticmethod
     def _get_tls_protocol():
