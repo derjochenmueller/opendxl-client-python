@@ -193,14 +193,14 @@ class DxlClientConfig(_BaseObject):
     _DEFAULT_PROXY_RDNS = True
     # The default OpenSSL cipher list used for the TLS connection to the
     # broker (``None`` uses the defaults of the Python ``ssl`` module).
-    # Strong (forward secrecy) suites come first; ``AES128-SHA256``
-    # (TLS_RSA_WITH_AES_128_CBC_SHA256) is kept as the last resort because
-    # Trellix DXL brokers before 6.1.1 only offer that suite for MQTT and the
-    # default cipher list of Python >= 3.10 no longer contains it (which is
-    # why client 5.7.0.1 hard-coded it). DXL 6.1.1+ ("strong ciphers along
-    # with weak ciphers", KB14602) and the open source broker negotiate an
-    # ECDHE suite from this list.
-    _DEFAULT_TLS_CIPHERS =         "ECDHE+AESGCM:ECDHE+AES:DHE+AES:AES128-SHA256:!aNULL:!eNULL"
+    # This branch targets Trellix ePO 5.10 SP1 Update 7+ with DXL Broker
+    # 6.1.1+ (strong MQTT ciphers, FIPS 140-3): only forward-secrecy suites
+    # are offered. Brokers before DXL 6.1.1 and the open source broker only
+    # support ``AES128-SHA256`` (TLS_RSA_WITH_AES_128_CBC_SHA256); for those
+    # use the ``epo-legacy`` branch or set ``TlsCiphers`` in the
+    # configuration file, e.g.
+    # ``ECDHE+AESGCM:ECDHE+AES:DHE+AES:AES128-SHA256:!aNULL:!eNULL``.
+    _DEFAULT_TLS_CIPHERS = "ECDHE+AESGCM:ECDHE+AES:DHE+AES:!aNULL:!eNULL"
 
     def __init__(self, broker_ca_bundle, cert_file, private_key, brokers, websocket_brokers=None, **proxy_args):
         """
@@ -579,10 +579,10 @@ class DxlClientConfig(_BaseObject):
         module (note that this list does not contain ``AES128-SHA256``, the
         only suite offered by Trellix DXL brokers before version 6.1.1).
 
-        Defaults to
-        ``"ECDHE+AESGCM:ECDHE+AES:DHE+AES:AES128-SHA256:!aNULL:!eNULL"``:
-        forward-secrecy suites first, ``AES128-SHA256`` as fallback for
-        older brokers.
+        Defaults to ``"ECDHE+AESGCM:ECDHE+AES:DHE+AES:!aNULL:!eNULL"``
+        (forward-secrecy suites only; requires Trellix DXL Broker 6.1.1 or
+        later). For older brokers append ``:AES128-SHA256`` (see the
+        ``epo-legacy`` branch).
 
         The value can also be set in the configuration file via the
         ``TlsCiphers`` setting of the ``General`` section (``default`` or an

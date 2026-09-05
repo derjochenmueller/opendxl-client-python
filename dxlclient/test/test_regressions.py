@@ -258,12 +258,12 @@ class ClientConfigRegressionTest(unittest.TestCase):
         context.set_ciphers(DxlClientConfig._DEFAULT_TLS_CIPHERS)
         names = [cipher["name"] for cipher in context.get_ciphers()]
 
-        # Legacy suite required by Trellix DXL brokers < 6.1.1 and the open
-        # source broker ...
-        self.assertIn("AES128-SHA256", names)
-        # ... but only as a fallback after forward-secrecy suites
-        self.assertEqual("AES128-SHA256", names[-1])
+        # master targets DXL >= 6.1.1: forward-secrecy suites only, the
+        # legacy RSA key transport suite is not offered by default
+        self.assertNotIn("AES128-SHA256", names)
         self.assertTrue(any(name.startswith("ECDHE-") for name in names))
+        self.assertTrue(all(name.startswith(("TLS_", "ECDHE-", "DHE-"))
+                            for name in names))
         self.assertFalse(any("NULL" in name for name in names))
 
     def test_tls_ciphers_from_config_file(self):
