@@ -140,6 +140,7 @@ class DxlClientConfig(_BaseObject):
     _CLIENT_ID_SETTING = u"ClientId"
     _USE_WEBSOCKETS_SETTING = u"UseWebSockets"
     _TLS_CIPHERS_SETTING = u"TlsCiphers"
+    _TLS_MIN_VERSION_SETTING = u"TlsMinVersion"
 
     # HTTP Proxy Section
     _PROXY_SECTION = u"Proxy"
@@ -156,7 +157,8 @@ class DxlClientConfig(_BaseObject):
         (_GENERAL_SECTION,
          ((_CLIENT_ID_SETTING, "Client Id", _NOT_REQUIRED),
           (_USE_WEBSOCKETS_SETTING, "Use WebSockets", _NOT_REQUIRED),
-          (_TLS_CIPHERS_SETTING, "TLS ciphers", _NOT_REQUIRED)),
+          (_TLS_CIPHERS_SETTING, "TLS ciphers", _NOT_REQUIRED),
+          (_TLS_MIN_VERSION_SETTING, "TLS minimum version", _NOT_REQUIRED)),
          _NOT_REQUIRED),
         (_CERTS_SECTION,
          ((_BROKER_CERT_CHAIN_SETTING, "Broker CA bundle", _REQUIRED),
@@ -191,6 +193,10 @@ class DxlClientConfig(_BaseObject):
     _DEFAULT_PROXY_TYPE = 3
     # Default proxy rdns setting is set to True
     _DEFAULT_PROXY_RDNS = True
+    # The minimum TLS protocol version offered to the broker ("1.2" or "1.3").
+    # TLS 1.0/1.1 are deprecated (RFC 8996) and not offered by DXL brokers.
+    _DEFAULT_TLS_MIN_VERSION = "1.2"
+    _TLS_VERSIONS = ("1.2", "1.3")
     # The default OpenSSL cipher list used for the TLS connection to the
     # broker (``None`` uses the defaults of the Python ``ssl`` module).
     # Strong (forward secrecy) suites come first; ``AES128-SHA256``
@@ -261,6 +267,7 @@ class DxlClientConfig(_BaseObject):
         self._incoming_message_queue_size = None
         self._incoming_message_thread_pool_size = None
         self._tls_ciphers = None
+        self._tls_min_version = None
         self._init_common()
 
     def _create_required_sections(self):
@@ -339,6 +346,8 @@ class DxlClientConfig(_BaseObject):
         self._proxy_rdns = self._DEFAULT_PROXY_RDNS
         # The OpenSSL cipher list for the TLS connection
         self._tls_ciphers = self._DEFAULT_TLS_CIPHERS
+        # The minimum TLS protocol version
+        self._tls_min_version = self._DEFAULT_TLS_MIN_VERSION
 
     def _get_value_from_config(self, section_or_setting_name):
         """
@@ -601,6 +610,25 @@ class DxlClientConfig(_BaseObject):
         self._set_value_to_config(self._TLS_CIPHERS_SETTING,
                                   "default" if tls_ciphers is None
                                   else tls_ciphers)
+
+    @property
+    def tls_min_version(self):
+        """
+        The minimum TLS protocol version used for the connection to the
+        broker, as a string: ``"1.2"`` (default) or ``"1.3"``. TLS 1.0 and
+        1.1 are never offered. The value can also be set in the configuration
+        file via the ``TlsMinVersion`` setting of the ``General`` section.
+        """
+        return self._tls_min_version
+
+    @tls_min_version.setter
+    def tls_min_version(self, tls_min_version):
+        tls_min_version = str(tls_min_version).strip()
+        if tls_min_version not in self._TLS_VERSIONS:
+            raise ValueError("Unsupported TLS minimum version: {} (expected one of {})".format(
+                tls_min_version, ", ".join(self._TLS_VERSIONS)))
+        self._tls_min_version = tls_min_version
+        self._set_value_to_config(self._TLS_MIN_VERSION_SETTING, tls_min_version)
 
     @staticmethod
     def _tls_ciphers_from_setting(value):
@@ -901,6 +929,9 @@ class DxlClientConfig(_BaseObject):
 
         self._tls_ciphers = self._tls_ciphers_from_setting(
             self._get_value_from_config(self._TLS_CIPHERS_SETTING))
+        tls_min_version = self._get_value_from_config(self._TLS_MIN_VERSION_SETTING)
+        if tls_min_version:
+            self.tls_min_version = tls_min_version
 
         # Get Proxy Settings from Config file
         self._proxy_addr = self._get_value_from_config(self._PROXY_ADDRESS_SETTING)

@@ -296,6 +296,31 @@ class ClientConfigRegressionTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_tls_min_version_default_validation_and_config_file(self):
+        config = DxlClientConfig(broker_ca_bundle="ca.crt",
+                                 cert_file="client.crt",
+                                 private_key="client.key",
+                                 brokers=[Broker.parse("ssl://b1")])
+        self.assertEqual("1.2", config.tls_min_version)
+        config.tls_min_version = "1.3"
+        self.assertEqual("1.3", config.tls_min_version)
+        with self.assertRaises(ValueError):
+            config.tls_min_version = "1.0"
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            config_file = os.path.join(temp_dir, "dxlclient.config")
+            with open(config_file, "w") as handle:
+                handle.write(
+                    "[General]\nTlsMinVersion = 1.3\n"
+                    "[Certs]\nBrokerCertChain = ca.crt\n"
+                    "CertFile = client.crt\nPrivateKey = client.key\n"
+                    "[Brokers]\nb1 = b1;8883;broker1\n")
+            config = DxlClientConfig.create_dxl_config_from_file(config_file)
+            self.assertEqual("1.3", config.tls_min_version)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_ipv6_broker_parsing(self):
         broker = Broker.parse("ssl://[::1]:8883")
         self.assertEqual("::1", broker.host_name)
@@ -367,6 +392,29 @@ class ConnectFailureTest(BaseClientTest):
     in the background (it kept reconnecting forever, ignoring
     ``connect_retries``, and blocked the loop of a later successful connect).
     """
+
+    @attr('system')
+    def test_tls_min_version_is_applied_to_the_ssl_context(self):
+        import ssl
+        config = DxlClientConfig.create_dxl_config_from_file(
+            os.path.dirname(os.path.abspath(__file__)) + "/client_config.cfg")
+        config.connect_retries = 0
+        with self.create_client_from_config(config) as client:
+            context = client._client._ssl_context
+            self.assertEqual(ssl.TLSVersion.TLSv1_2, context.minimum_version)
+            client.connect()
+            self.assertTrue(client.connected)
+            client.disconnect()
+
+        # A TLS 1.3 minimum cannot be negotiated with the open source broker
+        # (OpenSSL 1.0.2, TLS 1.2 only) -> connect() must fail cleanly
+        config.tls_min_version = "1.3"
+        with self.create_client_from_config(config) as client:
+            self.assertEqual(ssl.TLSVersion.TLSv1_3,
+                             client._client._ssl_context.minimum_version)
+            with self.assertRaises(DxlException):
+                client.connect()
+            self.assertFalse(client.connected)
 
     @attr('system')
     def test_failed_connect_does_not_start_mqtt_loop(self):
