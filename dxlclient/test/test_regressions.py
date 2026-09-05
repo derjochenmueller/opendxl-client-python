@@ -321,6 +321,31 @@ class ClientConfigRegressionTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_verify_hostname_default_and_config_file(self):
+        config = DxlClientConfig(broker_ca_bundle="ca.crt",
+                                 cert_file="client.crt",
+                                 private_key="client.key",
+                                 brokers=[Broker.parse("ssl://b1")])
+        self.assertFalse(config.verify_hostname)
+        config.verify_hostname = "yes"
+        self.assertTrue(config.verify_hostname)
+        with self.assertRaises(ValueError):
+            config.verify_hostname = "maybe"
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            config_file = os.path.join(temp_dir, "dxlclient.config")
+            with open(config_file, "w") as handle:
+                handle.write(
+                    "[General]\nVerifyHostname = true\n"
+                    "[Certs]\nBrokerCertChain = ca.crt\n"
+                    "CertFile = client.crt\nPrivateKey = client.key\n"
+                    "[Brokers]\nb1 = b1;8883;broker1\n")
+            config = DxlClientConfig.create_dxl_config_from_file(config_file)
+            self.assertTrue(config.verify_hostname)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_ipv6_broker_parsing(self):
         broker = Broker.parse("ssl://[::1]:8883")
         self.assertEqual("::1", broker.host_name)
@@ -338,6 +363,45 @@ class ClientConfigRegressionTest(unittest.TestCase):
         self.assertEqual("2001:db8::10", broker.ip_address)
         self.assertEqual("{guid};8883;broker.example;2001:db8::10",
                          broker._to_broker_string())
+
+
+class CsrKeyOptionsTest(unittest.TestCase):
+    """
+    Certificate requests can be generated with larger RSA keys or EC keys
+    (FIPS 140-3 profiles of ePO 5.10 SP1 Update 7).
+    """
+
+    @staticmethod
+    def _load_csr(pem_text):
+        from asn1crypto import csr, pem
+        _, _, der = pem.unarmor(pem_text.encode() if isinstance(pem_text, str) else pem_text)
+        return csr.CertificationRequest.load(der)
+
+    def test_rsa_3072_request(self):
+        from dxlclient._cli._crypto import CsrAndPrivateKeyGenerator, X509Name
+        generator = CsrAndPrivateKeyGenerator(X509Name("client"), key_bits=3072)
+        request = self._load_csr(generator.csr)
+        info = request["certification_request_info"]
+        self.assertEqual("sha256_rsa", request["signature_algorithm"]["algorithm"].native)
+        self.assertEqual("rsa", info["subject_pk_info"]["algorithm"]["algorithm"].native)
+        self.assertEqual(3072, info["subject_pk_info"].bit_size)
+
+    def test_ec_request(self):
+        from dxlclient._cli._crypto import CsrAndPrivateKeyGenerator, X509Name
+        generator = CsrAndPrivateKeyGenerator(X509Name("client"), key_type="ec",
+                                              curve="secp384r1")
+        request = self._load_csr(generator.csr)
+        info = request["certification_request_info"]
+        self.assertEqual("sha256_ecdsa", request["signature_algorithm"]["algorithm"].native)
+        self.assertEqual("ec", info["subject_pk_info"]["algorithm"]["algorithm"].native)
+        self.assertEqual("secp384r1", info["subject_pk_info"]["algorithm"]["parameters"].native)
+
+    def test_invalid_key_options(self):
+        from dxlclient._cli._crypto import CsrAndPrivateKeyGenerator, X509Name
+        with self.assertRaises(ValueError):
+            CsrAndPrivateKeyGenerator(X509Name("client"), key_bits=1024)
+        with self.assertRaises(ValueError):
+            CsrAndPrivateKeyGenerator(X509Name("client"), key_type="dsa")
 
 
 class ServiceRegistrationRetryTest(unittest.TestCase):
