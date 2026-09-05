@@ -469,19 +469,39 @@ class _ServiceRegistrationHandler(_BaseObject):
         """
         return self.deleted
 
+    # Delay (in seconds) before a failed (re-)registration attempt is retried
+    _REGISTER_RETRY_DELAY = 30
+
     def _timer_callback(self):
         """Callback invoked by the timer task (to re-register the service"""
-        if self.client.connected:
+        client = self.client
+        if client and client.connected:
             with self.lock:
                 # Send unregister event if service marked for deletion or is no
                 # longer valid
                 if self.deleted:
-                    self.mark_for_deletion()
-                    self.send_unregister_service_event()
-                    self.ttl_timer.cancel()
+                    try:
+                        self.send_unregister_service_event()
+                    except Exception as ex:  # pylint: disable=broad-except
+                        logger.error(
+                            "Error sending unregister service event for %s (%s): %s",
+                            self.service_type, self.instance_id, ex)
+                    if self.ttl_timer:
+                        self.ttl_timer.cancel()
                 else:
-                    self.send_register_service_request()
-                    self.ttl_timer = Timer(self.ttl * 60, self._timer_callback)
+                    delay = self.ttl * 60
+                    try:
+                        self.send_register_service_request()
+                    except Exception as ex:  # pylint: disable=broad-except
+                        # A failed (re-)registration (e.g. a request timeout)
+                        # must not stop the timer, otherwise the service
+                        # silently disappears from the fabric once its TTL
+                        # expires. Retry after a short delay instead.
+                        delay = self._REGISTER_RETRY_DELAY
+                        logger.error(
+                            "Error registering service %s (%s), retrying in %d seconds: %s",
+                            self.service_type, self.instance_id, delay, ex)
+                    self.ttl_timer = Timer(delay, self._timer_callback)
                     self.ttl_timer.daemon = True
                     self.ttl_timer.start()
         else:

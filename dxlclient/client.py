@@ -397,8 +397,8 @@ class DxlClient(_BaseObject):
                              certfile=config.cert_file,
                              keyfile=config.private_key,
                              cert_reqs=ssl.CERT_REQUIRED,
-                             tls_version=ssl.PROTOCOL_SSLv23,
-                             ciphers='AES128-SHA256')
+                             tls_version=self._get_tls_protocol(),
+                             ciphers=config.tls_ciphers)
         # The MQTT client TLS configuration to bypass hostname validation
         self._client.tls_insecure_set(True)
 
@@ -464,8 +464,14 @@ class DxlClient(_BaseObject):
     @property
     def connected(self):
         """Whether the client is currently connected to the DXL fabric."""
-        with self._connected_lock:
-            return self._connected
+        # Intentionally read without acquiring ``_connected_lock``: reading a
+        # bool attribute is atomic and acquiring the lock here caused a lock
+        # order inversion (service manager lock -> connected lock in
+        # ``_ServiceManager.on_disconnect``/``remove_service`` versus connected
+        # lock -> service manager lock in ``_on_connect_run``) which could
+        # deadlock when several unexpected disconnects triggered reconnects
+        # concurrently.
+        return self._connected
 
     def connect(self):
         """
@@ -511,6 +517,16 @@ class DxlClient(_BaseObject):
         # Check if we were connected
         if not self.connected:
             raise DxlException("Failed to establish connection")
+
+    @staticmethod
+    def _get_tls_protocol():
+        """
+        Returns the protocol constant used to create the TLS context. The
+        client-side protocol constant (available since Python 3.6) negotiates
+        the highest TLS version supported by both sides and is not deprecated;
+        older Python versions fall back to ``PROTOCOL_SSLv23``.
+        """
+        return getattr(ssl, "PROTOCOL_TLS_CLIENT", ssl.PROTOCOL_SSLv23)
 
     def _start_connect_thread(self, connect_retries=-1):
         self._thread = threading.Thread(target=self._connect_thread_main, args=[connect_retries])
@@ -572,6 +588,18 @@ class DxlClient(_BaseObject):
             self._disconnect()
         else:
             logger.warning("Trying to disconnect a disconnected client.")
+            self._stop_mqtt_loop()
+
+    def _stop_mqtt_loop(self):
+        """
+        Stops the network loop thread of the underlying MQTT client (if one
+        is running). Safe to call when no loop thread was started.
+        """
+        if self._client is not None:
+            try:
+                self._client.loop_stop()
+            except Exception as ex:  # pylint: disable=broad-except
+                logger.debug("Error stopping MQTT loop: %s", str(ex))
 
     def _disconnect(self):
         if self._service_manager:
@@ -580,7 +608,11 @@ class DxlClient(_BaseObject):
         logger.debug("Waiting for thread pool completion...")
         self._thread_pool.wait_completion()
 
-        for subscription in self._subscriptions:
+        # Iterate over a snapshot; the set may be modified concurrently by
+        # subscribe()/unsubscribe() calls from other threads.
+        with self._subscriptions_lock:
+            subscriptions = tuple(self._subscriptions)
+        for subscription in subscriptions:
             if self.connected:
                 try:
                     logger.debug("Unsubscribing from %s", subscription)
@@ -605,7 +637,7 @@ class DxlClient(_BaseObject):
             logger.debug("Waiting for the thread to terminate...")
             self._thread_terminate = True
             with self._connect_wait_lock:
-                self._connect_wait_condition.notifyAll()
+                self._connect_wait_condition.notify_all()
             while self._thread.is_alive():
                 self._thread.join(1)
             self._thread = None
@@ -778,6 +810,12 @@ class DxlClient(_BaseObject):
                 logger.error("Error during connect: %s", latest_ex)
             if latest_ex_traceback:
                 logger.debug(latest_ex_traceback)
+            # Do not start the MQTT network loop when no connection could be
+            # established. The loop thread would otherwise keep retrying the
+            # connection in the background forever (ignoring
+            # ``connect_retries``), leak one thread per failed connect() call
+            # and prevent a later loop_start() from succeeding.
+            return DXL_ERR_AGAIN
 
         logger.debug("Launching event loop...")
 
@@ -944,7 +982,7 @@ class DxlClient(_BaseObject):
             to the request. If the timeout is exceeded an exception will be raised. Defaults to ``3600``
             seconds (1 hour)
         """
-        if threading.currentThread().name.startswith(self._message_pool_prefix):
+        if threading.current_thread().name.startswith(self._message_pool_prefix):
             raise DxlException("Synchronous requests may not be invoked while handling an incoming message. " +
                                "The synchronous request must be made on a different thread.")
 

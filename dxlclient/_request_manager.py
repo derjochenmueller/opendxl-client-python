@@ -123,7 +123,6 @@ class RequestManager(ResponseCallback):
         :param response_callback: The callback to be invoked when the response is received
         :return: None
         """
-        destination = request.destination_topic
         if not response_callback is None:
             self.register_async_callback(request, response_callback)
         try:
@@ -133,7 +132,10 @@ class RequestManager(ResponseCallback):
         except Exception:
             try:
                 if not response_callback is None:
-                    self.unregister_async_callback(destination)
+                    # Callbacks are keyed by the request message identifier
+                    # (see register_async_callback), not by the destination
+                    # topic.
+                    self.unregister_async_callback(request.message_id)
             finally:
                 self.remove_current_request(request.message_id)
             raise
@@ -205,13 +207,16 @@ class RequestManager(ResponseCallback):
         message_id = request.message_id
 
         with self.sync_wait_message_lock:
-            wait_seconds = wait
-            wait_start = time.time()
+            wait_end = time.time() + wait
 
             while not message_id in self.sync_wait_message_responses:
-                self.sync_wait_message_condition.wait(wait_seconds)
-                if (time.time() - wait_start) >= wait_seconds:
+                remaining = wait_end - time.time()
+                if remaining <= 0:
                     raise WaitTimeoutException("Timeout waiting for response to message: " + message_id)
+                # Only wait for the remaining time so that notifications for
+                # other requests (which wake up all waiters) do not extend the
+                # effective timeout beyond the requested value.
+                self.sync_wait_message_condition.wait(remaining)
 
             response = self.sync_wait_message_responses[message_id]
             del self.sync_wait_message_responses[message_id]
@@ -229,7 +234,7 @@ class RequestManager(ResponseCallback):
                 if request_message_id in self.sync_wait_message_ids:
                     self.sync_wait_message_ids.remove(request_message_id)
                     self.sync_wait_message_responses[request_message_id] = response
-                    self.sync_wait_message_condition.notifyAll()
+                    self.sync_wait_message_condition.notify_all()
 
             # Check for asynchronous callbacks
             callback = self.unregister_async_callback(request_message_id)

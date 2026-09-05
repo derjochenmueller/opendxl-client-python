@@ -7,7 +7,7 @@
 
 from __future__ import absolute_import
 from __future__ import print_function
-from abc import ABCMeta, abstractproperty, abstractmethod
+from abc import ABCMeta, abstractmethod
 import argparse
 import getpass
 import json
@@ -358,7 +358,8 @@ class Subcommand(ABCMeta('ABC', (object,), {'__slots__': ()})): # compatible met
     """
     Abstract base class for cli subcommands
     """
-    @abstractproperty
+    @property
+    @abstractmethod
     def help(self):
         """
         Help text to display at the cli for the subcommand
@@ -366,7 +367,8 @@ class Subcommand(ABCMeta('ABC', (object,), {'__slots__': ()})): # compatible met
         """
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def name(self):
         """
         Name of the subcommand, used as the argument to identify the subcommand
@@ -720,7 +722,7 @@ class UpdateConfigSubcommand(Subcommand):  # pylint: disable=no-init
                 },
                 ...
             ],
-            "brokersWebSockets": [
+            "webSocketBrokers": [
                 {
                     "guid": "{2c5b107c-7f51-11e7-0ebf-0800271cfa58}",
                     "hostName": "broker1",

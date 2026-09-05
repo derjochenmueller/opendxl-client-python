@@ -11,6 +11,7 @@ import setuptools.command.sdist
 import distutils.command.sdist
 import distutils.log
 import subprocess
+import sys
 
 
 # Patch setuptools' sdist behaviour with distutils' sdist behaviour
@@ -53,16 +54,23 @@ class CiCommand(Command):
         pass
     def run(self):
         self.run_command("lint")
-        self.run_command("test")
+        self.announce("Running tests", level=distutils.log.INFO)
+        subprocess.check_call([sys.executable, "-m", "pytest",
+                               "dxlclient/test"])
 
 TEST_REQUIREMENTS = [
     'futures; python_version == "3.7"',
     "mock",
-    "nose",
+    # nose is unmaintained and does not work on Python >= 3.10; pynose is a
+    # maintained drop-in fork providing the same ``nose`` package.
+    'nose; python_version < "3.10"',
+    'pynose; python_version >= "3.10"',
     "parameterized",
+    "pytest",
     'astroid<2.3.0; python_version == "3.7"',
-    'astroid==2.3.3; python_version > "3.7"',
-    "pylint<=2.3.1",
+    'astroid==2.3.3; python_version > "3.7" and python_version < "3.10"',
+    'pylint<=2.3.1; python_version < "3.10"',
+    'pylint; python_version >= "3.10"',
     "requests-mock"
 ]
 
@@ -107,7 +115,7 @@ setup(
     install_requires=[
         "asn1crypto",
         "configobj",
-        "msgpack>=0.5,<1.0.0",
+        "msgpack>=0.5",
         "requests",
         "PySocks"
     ],
@@ -118,8 +126,6 @@ setup(
         "dev": DEV_REQUIREMENTS,
         "test": TEST_REQUIREMENTS
     },
-
-    test_suite="nose.collector",
 
     # Details
     url="http://www.mcafee.com/",
@@ -136,6 +142,11 @@ setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
     ],
 
     cmdclass={

@@ -72,8 +72,7 @@ def _validate_proxy_address(address):
     :param address: HTTP proxy address
     """
     try:
-        if not (socket.gethostbyname(address) == address or socket.gethostbyname(address) != address):
-            raise socket.gaierror
+        socket.gethostbyname(address)
     except socket.gaierror as proxy_address_error:
         raise InvalidProxyConfigurationError("Proxy address is not valid: " + str(proxy_address_error))
 
@@ -190,6 +189,9 @@ class DxlClientConfig(_BaseObject):
     _DEFAULT_PROXY_TYPE = 3
     # Default proxy rdns setting is set to True
     _DEFAULT_PROXY_RDNS = True
+    # The default OpenSSL cipher list used for the TLS connection to the
+    # broker (``None`` uses the defaults of the Python ``ssl`` module).
+    _DEFAULT_TLS_CIPHERS = "AES128-SHA256"
 
     def __init__(self, broker_ca_bundle, cert_file, private_key, brokers, websocket_brokers=None, **proxy_args):
         """
@@ -222,8 +224,10 @@ class DxlClientConfig(_BaseObject):
         self._brokers = brokers
         # The list of WebSocket brokers
         self._websocket_brokers = websocket_brokers
-        # Whether to use WebSockets or regular MQTT over tcp
-        self._use_websockets = False
+        # Whether to use WebSockets or regular MQTT over tcp. Defaults to
+        # WebSockets only if exclusively WebSocket brokers were specified
+        # (consistent with :meth:`create_dxl_config_from_file`).
+        self._use_websockets = bool(websocket_brokers and not brokers)
         # Proxy settings
         self._proxy_type = None
         self._proxy_rdns = None
@@ -247,6 +251,7 @@ class DxlClientConfig(_BaseObject):
         self._queue = None
         self._incoming_message_queue_size = None
         self._incoming_message_thread_pool_size = None
+        self._tls_ciphers = None
         self._init_common()
 
     def _create_required_sections(self):
@@ -323,6 +328,8 @@ class DxlClientConfig(_BaseObject):
         # Default proxy settings for rdns and proxy type
         self._proxy_type = self._DEFAULT_PROXY_TYPE
         self._proxy_rdns = self._DEFAULT_PROXY_RDNS
+        # The OpenSSL cipher list for the TLS connection
+        self._tls_ciphers = self._DEFAULT_TLS_CIPHERS
 
     def _get_value_from_config(self, section_or_setting_name):
         """
@@ -553,6 +560,24 @@ class DxlClientConfig(_BaseObject):
         :param proxy_rdns: Proxy rdns
         """
         self._proxy_rdns = proxy_rdns
+
+    @property
+    def tls_ciphers(self):
+        """
+        The OpenSSL cipher list (see the ``ciphers`` argument of
+        :func:`ssl.SSLContext.set_ciphers`) used for the TLS connection to the
+        broker. ``None`` uses the default cipher list of the Python ``ssl``
+        module, which lets the broker and client negotiate the strongest
+        mutually supported cipher (typically an ECDHE suite with forward
+        secrecy).
+
+        Defaults to ``"AES128-SHA256"``
+        """
+        return self._tls_ciphers
+
+    @tls_ciphers.setter
+    def tls_ciphers(self, tls_ciphers):
+        self._tls_ciphers = tls_ciphers
 
     @property
     def incoming_message_queue_size(self):

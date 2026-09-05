@@ -86,7 +86,10 @@ class MessagePayloadTest(BaseClientTest):
                         self.request_complete_condition.wait(self.MAX_WAIT)
 
                 self.assertIsNotNone(self.request_received)
-                unpacker = msgpack.Unpacker(file_like=BytesIO(request.payload))
+                # raw=True: return bytes for string values regardless of the
+                # msgpack version (the default changed in msgpack 1.0)
+                unpacker = msgpack.Unpacker(file_like=BytesIO(request.payload),
+                                            raw=True)
                 self.assertEqual(next(unpacker).decode('utf8'),
                                  self.TEST_STRING)
                 self.assertEqual(next(unpacker), self.TEST_BYTE)

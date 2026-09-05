@@ -41,7 +41,7 @@ the client should use the asynchronous form for sending requests,
 
 from __future__ import absolute_import
 from io import BytesIO
-from abc import ABCMeta, abstractproperty, abstractmethod
+from abc import ABCMeta, abstractmethod
 
 import os
 os.environ['MSGPACK_PUREPYTHON'] = "1"
@@ -164,7 +164,8 @@ class Message(ABCMeta('ABC', (_BaseObject,), {'__slots__': ()})): # compatible m
         """
         return self._source_broker_id
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def message_type(self):
         """
         The numeric type of the message
@@ -328,7 +329,13 @@ class Message(ABCMeta('ABC', (_BaseObject,), {'__slots__': ()})): # compatible m
         :returns: {@code BytesIO} object.
         """
         buf = BytesIO()
-        packer = msgpack.Packer()
+        # msgpack >= 1.0 changed the default of ``use_bin_type`` from False to
+        # True, which would serialize ``bytes`` values with the msgpack "bin"
+        # family instead of the legacy "raw" family. The DXL wire format (and
+        # the broker as well as the other DXL clients) expects the legacy
+        # format, so it is pinned explicitly here. See :meth:`_from_bytes`
+        # for the counterpart on the unpacking side (``raw=True``).
+        packer = msgpack.Packer(use_bin_type=False)
         buf.write(packer.pack(self.version))
         buf.write(packer.pack(self.message_type))
         # Version 0
@@ -352,7 +359,14 @@ class Message(ABCMeta('ABC', (_BaseObject,), {'__slots__': ()})): # compatible m
         """
         buf = BytesIO(raw)
         buf.seek(0)
-        unpacker = msgpack.Unpacker(buf)
+        # ``raw=True`` restores the pre-msgpack-1.0 behavior of returning
+        # ``bytes`` (rather than ``str``) for string values; the message
+        # fields are explicitly decoded in :meth:`_decode_to_unicode_string`.
+        # ``max_buffer_size`` lifts the 1 MiB per-value limit that older
+        # msgpack versions apply by default (``max_str_len``/``max_bin_len``),
+        # which prevented messages with payloads larger than 1 MiB from being
+        # received when the broker allows them.
+        unpacker = msgpack.Unpacker(buf, raw=True, max_buffer_size=len(raw))
         version = next(unpacker)
         message_type = next(unpacker)
 
@@ -378,7 +392,7 @@ class Message(ABCMeta('ABC', (_BaseObject,), {'__slots__': ()})): # compatible m
                 message._unpack_message_v2(unpacker)
             return message
 
-        raise DxlException("Unknown message type: " + message_type)
+        raise DxlException("Unknown message type: " + str(message_type))
 
     @staticmethod
     def _decode_to_unicode_string(obj):

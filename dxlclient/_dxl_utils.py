@@ -124,7 +124,12 @@ class DxlUtils(object):
         :param int mode: permissions mode to use for the file
         """
         DxlUtils.makedirs(os.path.dirname(filename))
-        with os.fdopen(os.open(filename, os.O_WRONLY | os.O_CREAT, mode),
+        # O_TRUNC is required so that the previous content of an existing
+        # file is fully replaced. Without it, a shorter ``data`` would leave
+        # the tail of the old file in place (e.g. a corrupted PEM file when a
+        # certificate or private key is re-provisioned).
+        with os.fdopen(os.open(filename,
+                               os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode),
                        'wb' if isinstance(data, bytes) else 'w') as handle:
             handle.write(data)
 
