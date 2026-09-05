@@ -17,33 +17,31 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.7, 3.8, 3.9]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
       fail-fast: false
-    
+
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v4
       with:
         submodules: recursive
-        
+
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}        
-                
+        python-version: ${{ matrix.python-version }}
+
     - name: Install broker
       run: |
         docker pull opendxl/opendxl-broker
         docker run -d -p 8883:8883 -p 8443:8443 -p 443:443 opendxl/opendxl-broker
         docker ps -a
-              
+
     - name: Install dependencies
       run: |
-        pip install --upgrade pip	
-        pip install --upgrade pipenv --no-deps
+        pip install --upgrade pip
         pip install wheel
         pip install .[test]
-        python setup.py install
 
     - name: Execute CI
       run: |
@@ -53,9 +51,9 @@ jobs:
         # The open source broker only offers AES128-SHA256 for MQTT
         printf 'TlsCiphers = ECDHE+AESGCM:ECDHE+AES:DHE+AES:AES128-SHA256:!aNULL:!eNULL\n' >> dxlclient/test/client_config.cfg
         cat dxlclient/test/client_config.cfg
-        echo Running tests with MQTT  
-        python setup.py ci
+        echo Running tests with MQTT
+        python -m pytest dxlclient/test
         sed -i -e "s/= False/= True/g" -e "s/;8883/;443/g" -e "s/Brokers/BrokersWebSockets/g" dxlclient/test/client_config.cfg
         cat dxlclient/test/client_config.cfg
-        echo Running tests with WebSockets  
-        python setup.py ci
+        echo Running tests with WebSockets
+        python -m pytest dxlclient/test
